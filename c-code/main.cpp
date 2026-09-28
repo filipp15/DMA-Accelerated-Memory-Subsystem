@@ -1,11 +1,3 @@
-// =============================================================================
-// Demo + benchmark za ArenaAllocator i PoolAllocator.
-//
-// 1) Proverava da alokacije zaista poštuju 64B poravnanje (bitno za DMA/SIMD)
-// 2) Proverava da su podaci upisani na dodeljenu memoriju zaista tu i ostali
-// 3) Meri koliko traje N alokacija preko naših alokatora naspram malloc-a
-// =============================================================================
-
 #include "arena_allocator.hpp"
 #include "pool_allocator.hpp"
 
@@ -21,18 +13,15 @@ static bool is_aligned(const void* ptr, std::size_t alignment) {
     return (reinterpret_cast<std::uintptr_t>(ptr) % alignment) == 0;
 }
 
-// -----------------------------------------------------------------------------
 void test_arena_correctness() {
     std::printf("== ArenaAllocator: test ispravnosti ==\n");
 
-    mem::ArenaAllocator arena(1 << 20); // 1 MB arena
-
-    // Alociramo blok "kao da" ćemo tu smestiti podatke za DMA prenos
+    mem::ArenaAllocator arena(1 << 20); 
+    
     float* buffer = arena.allocate<float>(1024);
     assert(buffer != nullptr);
     assert(is_aligned(buffer, 64));
 
-    // Upisujemo prepoznatljive vrednosti i proveravamo da ostaju netaknute
     for (int i = 0; i < 1024; ++i) buffer[i] = static_cast<float>(i);
     for (int i = 0; i < 1024; ++i) assert(buffer[i] == static_cast<float>(i));
 
@@ -44,11 +33,9 @@ void test_arena_correctness() {
     std::printf("  reset() OK - arena je ponovo prazna\n\n");
 }
 
-// -----------------------------------------------------------------------------
 void test_pool_correctness() {
     std::printf("== PoolAllocator: test ispravnosti ==\n");
 
-    // Pool za "DMA deskriptore" fiksne veličine (npr. 128B po deskriptoru)
     mem::PoolAllocator pool(128, 100);
 
     std::vector<void*> taken;
@@ -59,9 +46,8 @@ void test_pool_correctness() {
         taken.push_back(p);
     }
     assert(pool.free_count() == 0);
-    assert(pool.allocate() == nullptr); // pool je pun, mora vratiti nullptr
+    assert(pool.allocate() == nullptr); 
 
-    // Vraćamo pola blokova i proveravamo da mogu ponovo da se uzmu
     for (int i = 0; i < 50; ++i) pool.deallocate(taken[i]);
     assert(pool.free_count() == 50);
 
@@ -74,14 +60,12 @@ void test_pool_correctness() {
     std::printf("  Alokacija/dealokacija 100 blokova OK, poravnanje OK\n\n");
 }
 
-// -----------------------------------------------------------------------------
 void benchmark_arena_vs_malloc() {
     constexpr int N = 1'000'000;
-    constexpr std::size_t BLOCK = 64; // tipična veličina "malog" DMA paketa
+    constexpr std::size_t BLOCK = 64; 
 
     std::printf("== Benchmark: %d alokacija po %zu B ==\n", N, BLOCK);
 
-    // --- malloc ---
     {
         auto t0 = Clock::now();
         std::vector<void*> ptrs;
@@ -97,7 +81,6 @@ void benchmark_arena_vs_malloc() {
                     ms, ms * 1e6 / N);
     }
 
-    // --- ArenaAllocator ---
     {
         mem::ArenaAllocator arena(static_cast<std::size_t>(N) * BLOCK + (1 << 20));
         auto t0 = Clock::now();
@@ -112,7 +95,6 @@ void benchmark_arena_vs_malloc() {
                     ms, ms * 1e6 / N);
     }
 
-    // --- PoolAllocator (alokacija + dealokacija, fer poređenje sa malloc/free ciklusom) ---
     {
         mem::PoolAllocator pool(BLOCK, N);
         std::vector<void*> ptrs;
@@ -131,7 +113,6 @@ void benchmark_arena_vs_malloc() {
     }
 }
 
-// -----------------------------------------------------------------------------
 int main() {
     test_arena_correctness();
     test_pool_correctness();
