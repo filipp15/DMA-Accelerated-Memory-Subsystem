@@ -18,8 +18,9 @@ dma_cosim/    Verilog version of the DMA + Verilator co-sim with the allocator
 
 ## Running it
 
-Need g++, verilator, ghdl (apt install all three).
+Need `g++`, `verilator`, `ghdl` (apt install all three).
 
+```bash
 # allocator only
 cd allocator && make run
 
@@ -31,6 +32,7 @@ cd dma_cosim
 verilator --cc --exe --build -j 0 -CFLAGS "-std=c++20 -I$(pwd)/harness/include" \
   --top-module dma_controller rtl/dma_controller.v harness/main.cpp --Mdir obj_dir
 ./obj_dir/Vdma_controller
+```
 
 Tested with 1000 words, took ~6 cycles per word which lines up with how the FSM is designed (read + write + handshakes = 6 steps per word).
 
