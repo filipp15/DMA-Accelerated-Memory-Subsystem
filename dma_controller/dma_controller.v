@@ -1,0 +1,186 @@
+module dma_controller #(
+    parameter ADDR_WIDTH = 32,
+    parameter DATA_WIDTH = 32
+) (
+    input  wire clk,
+    input  wire rst_n,       
+
+    input  wire                    start,
+    input  wire [ADDR_WIDTH-1:0]   src_addr_in,
+    input  wire [ADDR_WIDTH-1:0]   dst_addr_in,
+    input  wire [31:0]             length_in,
+
+    output reg  busy,
+    output reg  done,          
+    output reg  error,
+
+    output reg  [ADDR_WIDTH-1:0]   m_axi_araddr,
+    output reg                     m_axi_arvalid,
+    input  wire                    m_axi_arready,
+
+    input  wire [DATA_WIDTH-1:0]   m_axi_rdata,
+    input  wire                    m_axi_rvalid,
+    output reg                     m_axi_rready,
+    input  wire [1:0]              m_axi_rresp,
+
+    output reg  [ADDR_WIDTH-1:0]   m_axi_awaddr,
+    output reg                     m_axi_awvalid,
+    input  wire                    m_axi_awready,
+
+    output reg  [DATA_WIDTH-1:0]   m_axi_wdata,
+    output reg                     m_axi_wvalid,
+    input  wire                    m_axi_wready,
+
+    input  wire                    m_axi_bvalid,
+    output reg                     m_axi_bready,
+    input  wire [1:0]              m_axi_bresp
+);
+
+    localparam [1:0] AXI_OKAY = 2'b00;
+
+    localparam IDLE   = 4'd0,
+               SETUP  = 4'd1,
+               RADDR  = 4'd2,
+               RDATA  = 4'd3,
+               WADDR  = 4'd4,
+               WDATA  = 4'd5,
+               WRESP  = 4'd6,
+               NEXTW  = 4'd7,
+               DONE_S = 4'd8,
+               ERROR_S= 4'd9;
+
+    reg [3:0] state, state_next;
+
+    reg [ADDR_WIDTH-1:0] src_reg, dst_reg;
+    reg [31:0]           words_left;
+    reg [DATA_WIDTH-1:0] data_hold;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            state <= IDLE;
+        else
+            state <= state_next;
+    end
+
+    always @(*) begin
+        state_next = state;
+        case (state)
+            IDLE: begin
+                if (start)
+                    state_next = SETUP;
+            end
+
+            SETUP: begin
+                if (length_in == 32'd0)
+                    state_next = DONE_S;
+                else
+                    state_next = RADDR;
+            end
+
+            RADDR: if (m_axi_arready) state_next = RDATA;
+
+            RDATA: begin
+                if (m_axi_rvalid) begin
+                    if (m_axi_rresp != AXI_OKAY)
+                        state_next = ERROR_S;
+                    else
+                        state_next = WADDR;
+                end
+            end
+
+            WADDR: if (m_axi_awready) state_next = WDATA;
+
+            WDATA: if (m_axi_wready) state_next = WRESP;
+
+            WRESP: begin
+                if (m_axi_bvalid) begin
+                    if (m_axi_bresp != AXI_OKAY)
+                        state_next = ERROR_S;
+                    else
+                        state_next = NEXTW;
+                end
+            end
+
+            NEXTW: begin
+                if (words_left == 32'd0)
+                    state_next = DONE_S;
+                else
+                    state_next = RADDR;
+            end
+
+            DONE_S:  state_next = IDLE;
+            ERROR_S: state_next = IDLE;
+
+            default: state_next = IDLE;
+        endcase
+    end
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            src_reg    <= {ADDR_WIDTH{1'b0}};
+            dst_reg    <= {ADDR_WIDTH{1'b0}};
+            words_left <= 32'd0;
+            data_hold  <= {DATA_WIDTH{1'b0}};
+        end else begin
+            case (state)
+                SETUP: begin
+                    src_reg    <= src_addr_in;
+                    dst_reg    <= dst_addr_in;
+                    words_left <= length_in;
+                end
+
+                RDATA: begin
+                    if (m_axi_rvalid && m_axi_rresp == AXI_OKAY)
+                        data_hold <= m_axi_rdata;
+                end
+
+                WRESP: begin
+                    if (m_axi_bvalid && m_axi_bresp == AXI_OKAY) begin
+                        src_reg    <= src_reg + (DATA_WIDTH/8);
+                        dst_reg    <= dst_reg + (DATA_WIDTH/8);
+                        words_left <= words_left - 32'd1;
+                    end
+                end
+
+                default: ; 
+            endcase
+        end
+    end
+
+    always @(*) begin
+        m_axi_araddr  = src_reg;
+        m_axi_arvalid = 1'b0;
+        m_axi_rready  = 1'b0;
+
+        m_axi_awaddr  = dst_reg;
+        m_axi_awvalid = 1'b0;
+
+        m_axi_wdata   = data_hold;
+        m_axi_wvalid  = 1'b0;
+
+        m_axi_bready  = 1'b0;
+
+        busy  = 1'b1;
+        done  = 1'b0;
+        error = 1'b0;
+
+        case (state)
+            IDLE:  busy = 1'b0;
+            RADDR: m_axi_arvalid = 1'b1;
+            RDATA: m_axi_rready  = 1'b1;
+            WADDR: m_axi_awvalid = 1'b1;
+            WDATA: m_axi_wvalid  = 1'b1;
+            WRESP: m_axi_bready  = 1'b1;
+            DONE_S: begin
+                busy = 1'b0;
+                done = 1'b1;
+            end
+            ERROR_S: begin
+                busy  = 1'b0;
+                error = 1'b1;
+            end
+            default: ;
+        endcase
+    end
+
+endmodule
