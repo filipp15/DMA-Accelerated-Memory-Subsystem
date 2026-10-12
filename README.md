@@ -1,6 +1,6 @@
 # DMA Memory Subsystem
 
-School/personal project - tried to build a mini version of how AI accelerators move data around without bothering the CPU for every copy.
+Personal project - tried to build a mini version of how AI accelerators move data around without bothering the CPU for every copy.
 
 Basically two parts that talk to each other:
 - a custom memory allocator in C++ (no `malloc`, does its own thing, O(1))
