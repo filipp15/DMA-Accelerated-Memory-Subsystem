@@ -1,49 +1,80 @@
 # DMA Memory Subsystem
 
-Personal project - tried to build a mini version of how AI accelerators move data around without bothering the CPU for every copy.
+A small project I made to understand how AI accelerators and SoCs move data around without making the CPU copy everything by hand.
 
-Basically two parts that talk to each other:
-- a custom memory allocator in C++ (no `malloc`, does its own thing, O(1))
-- a DMA controller I wrote in VHDL and then ported to Verilog so it could run with Verilator
+It has two parts that work together:
+- a custom memory allocator in C++ (arena + pool, no `malloc`, O(1) allocation, 64-byte aligned)
+- a DMA controller that I wrote in VHDL, then ported to Verilog so I could run it with Verilator
 
-Verilator turns the Verilog into a C++ class, and then I hooked it up so the "hardware" reads/writes straight into the same memory buffer the allocator manages. So it's not just two separate demos, they actually run together.
+In the co-simulation, Verilator turns the Verilog DMA into a C++ class, and I connected it so the "hardware" reads and writes directly into the memory that my allocator handed out. So the two parts actually run together and not just separately.
 
 ## Folders
 
 ```
-allocator/    just the C++ allocator, no hardware stuff
-dma_vhdl/     DMA controller in VHDL + GHDL testbench
-dma_cosim/    Verilog version of the DMA + Verilator co-sim with the allocator
+allocator/    the C++ allocator on its own, no hardware
+dma_vhdl/     DMA controller in VHDL + testbench (GHDL)
+dma_cosim/    Verilog version of the DMA + Verilator co-simulation with the allocator
 ```
 
-## Running it
-
-Need `g++`, `verilator`, `ghdl` (apt install all three).
+## What you need
 
 ```bash
-# allocator only
-cd allocator && make run
-
-# VHDL testbench
-cd dma_vhdl && bash run_sim.sh
-
-# the actual co-simulation
-cd dma_cosim
-verilator --cc --exe --build -j 0 -CFLAGS "-std=c++20 -I$(pwd)/harness/include" \
-  --top-module dma_controller rtl/dma_controller.v harness/main.cpp --Mdir obj_dir
-./obj_dir/Vdma_controller
+sudo apt install g++ make verilator ghdl
 ```
 
-Tested with 1000 words, took ~6 cycles per word which lines up with how the FSM is designed (read + write + handshakes = 6 steps per word).
+I used Ubuntu on WSL. Verilator doesn't really work natively on Windows.
 
-Also did a quick benchmark comparing CPU time if it copies manually vs just telling the DMA to do it - manual copy time grows with size, DMA command time stays flat (~40ns no matter the size) since the CPU just writes a few registers and moves on. That's the whole point basically.
+## How to run
 
-## Bug worth mentioning
+Allocator (tests + a quick benchmark against malloc):
+```bash
+cd allocator
+make run
+```
 
-Spent a while debugging why the DMA always finished instantly no matter what - turned out I was checking `words_left == 0` in the state where `words_left` gets loaded, so it was reading the old value (0) before the load actually happened. Fixed by checking the input signal directly instead of the not-yet-updated register.
+VHDL testbench:
+```bash
+cd dma_vhdl
+bash run_sim.sh
+```
+
+Co-simulation (allocator + DMA, 1000 words):
+```bash
+cd dma_cosim
+bash build_and_run.sh
+```
+
+Benchmark (CPU copying by hand vs just sending a command to the DMA):
+```bash
+cd dma_cosim
+verilator --cc --exe --build -j 0 -CFLAGS "-std=c++20 -O2 -I$(pwd)/harness/include" \
+  --top-module dma_controller rtl/dma_controller.v harness/benchmark.cpp --Mdir obj_dir_bench
+./obj_dir_bench/Vdma_controller
+```
+
+Waveform (needs gtkwave to open it):
+```bash
+cd dma_cosim
+verilator --cc --exe --build -j 0 --trace -CFLAGS "-std=c++20 -I$(pwd)/harness/include" \
+  --top-module dma_controller rtl/dma_controller.v harness/main_trace.cpp --Mdir obj_dir_trace
+cd obj_dir_trace && ./Vdma_controller
+gtkwave dma_trace.vcd
+```
+
+## Results
+
+The 1000 word transfer finishes in 6001 cycles, which is 6 per word. That matches the FSM (address, data and response handshakes for read and write).
+
+In the benchmark, copying by hand takes longer the bigger the transfer is, but the CPU side of a DMA transfer stays at around 40 ns no matter how much data moves. This makes sense since the CPU only writes a few registers and the DMA does the rest. The numbers for very small sizes are noisy, so only the larger ones are meaningful.
+
+## Notes
+
+- The bus is AXI4-Lite style (one word per transaction), not full AXI4 with bursts.
+- Verilator only reads Verilog, so the VHDL version is the one I tested first with GHDL and the Verilog one is a port of it with the same logic.
+- Bug I lost some time on: in the SETUP state I checked `words_left == 0`, but that register only gets loaded in that same state, so it still had the old value and the DMA thought every transfer was empty. Checking `length_in` directly fixed it.
 
 ## TODO
 
-- real AXI4 bursts instead of the simplified one-word-at-a-time version
-- error handling tests
-- maybe try on an actual FPGA at some point
+- real AXI4 bursts
+- tests for error responses
+- maybe try it on an FPGA
