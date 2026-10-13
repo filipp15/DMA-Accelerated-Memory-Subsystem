@@ -1,0 +1,24 @@
+# Verilator generated build output - regenerated from source every time
+obj_dir/
+obj_dir_bench/
+obj_dir_trace/
+
+# GHDL generated work library
+work/
+*.o
+*.cf
+
+# Waveform files (can be big, regenerate with main_trace.cpp if needed)
+*.vcd
+*.fst
+
+# Compiled C++ binaries
+demo
+*.out
+*.exe
+
+# Editor / OS junk
+.vscode/
+.idea/
+*.swp
+.DS_Store
